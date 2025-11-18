@@ -1,0 +1,3503 @@
+
+/* === ./srcs/input/move.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   move.c                                             :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: michel <michel@student.42.fr>              +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2025/11/17 02:24:33 by michel            #+#    #+#             */
+/*   Updated: 2025/11/17 15:54:46 by michel           ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "../../includes/cub3d.h"
+
+static int is_wall(t_game *game, double y, double x)
+{
+    int mx;
+    int my;
+
+    mx = (int)x;
+    my = (int)y;
+    if (my < 0 || my >= game->map.height || mx < 0 || mx >= game->map.width)
+        return (1);
+    return (game->map.grid[my][mx] == '1');
+}
+
+static void	update_camera_plane(t_game *g)
+{
+	g->player.plane_x = -sin(g->player.dir) * 0.66;
+	g->player.plane_y = cos(g->player.dir) * 0.66;
+}
+
+void	handle_input(t_game *g)
+{
+	double	m;
+	double	r;
+	double	nx;
+	double	ny;
+	double	step;
+	double	side;
+
+	m = 0.08;
+	r = 0.045;
+	/* avant/arrière */
+	if (g->key_w || g->key_s)
+	{
+		step = (g->key_w ? m : -m);
+		nx = g->player.x + cos(g->player.dir) * step;
+		ny = g->player.y + sin(g->player.dir) * step;
+		if (!is_wall(g, g->player.y, nx))
+			g->player.x = nx;
+		if (!is_wall(g, ny, g->player.x))
+			g->player.y = ny;
+	}
+	/* strafe gauche/droite (A/D) */
+	if (g->key_a || g->key_d)
+	{
+		side = (g->key_d ? 1.0 : -1.0);
+		/* plane a une norme ~0.66, on compense pour rester à vitesse ~m */
+		nx = g->player.x + g->player.plane_x * (m / 0.66) * side;
+		ny = g->player.y + g->player.plane_y * (m / 0.66) * side;
+		if (!is_wall(g, g->player.y, nx))
+			g->player.x = nx;
+		if (!is_wall(g, ny, g->player.x))
+			g->player.y = ny;
+	}
+	/* rotation */
+	if (g->key_l)
+		g->player.dir -= r;
+	if (g->key_r)
+		g->player.dir += r;
+	/* normalisation de l’angle dans [0, 2π) */
+	while (g->player.dir < 0.0)
+		g->player.dir += 2.0 * M_PI;
+	while (g->player.dir >= 2.0 * M_PI)
+		g->player.dir -= 2.0 * M_PI;
+	update_camera_plane(g);
+}
+/* === ./srcs/input/hooks.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   hook.c                                             :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: michel <michel@student.42.fr>              +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2025/11/17 02:04:10 by michel            #+#    #+#             */
+/*   Updated: 2025/11/17 13:48:40 by michel           ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "../../includes/cub3d.h"
+
+int key_press(int key, t_game *g)
+{
+    if (key == XK_w) g->key_w = 1;
+    else if (key == XK_s) g->key_s = 1;
+    else if (key == XK_a) g->key_a = 1;
+    else if (key == XK_d) g->key_d = 1;
+    else if (key == XK_Left) g->key_l = 1;
+    else if (key == XK_Right) g->key_r = 1;
+    else if (key == XK_Escape) return (game_destroy(g), exit(0), 0);
+    return (0);
+}
+
+int key_release(int key, t_game *g)
+{
+    if (key == XK_w) g->key_w = 0;
+    else if (key == XK_s) g->key_s = 0;
+    else if (key == XK_a) g->key_a = 0;
+    else if (key == XK_d) g->key_d = 0;
+    else if (key == XK_Left) g->key_l = 0;
+    else if (key == XK_Right) g->key_r = 0;
+    return (0);
+}
+
+int close_win(t_game *g)
+{
+    game_destroy(g);
+    exit(0);
+    return (0);
+}
+/* === ./srcs/parse/map_check.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   map_check.c                                        :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: michel <michel@student.42.fr>              +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2025/11/15 13:06:38 by michel            #+#    #+#             */
+/*   Updated: 2025/11/17 13:49:45 by michel           ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "../../includes/cub3d.h"
+
+static int bad_neighbor(t_map *m, int y, int x)
+{
+    if (y <= 0 || x <= 0 || y >= m->height - 1 || x >= m->width - 1)
+        return (1);
+    if (m->grid[y - 1][x] == ' ')
+        return (1);
+    if (m->grid[y + 1][x] == ' ')
+        return (1);
+    if (m->grid[y][x - 1] == ' ')
+        return (1);
+    if (m->grid[y][x + 1] == ' ')
+        return (1);
+    return (0);
+}
+
+int check_map_closed(t_map *map, t_player *p)
+{
+    int y;
+    int x;
+    
+    p->x = -1;
+    p->y = -1;
+    y = 0;
+    while (y < map->height)
+    {
+        x = 0;
+        while (x < map->width)
+        {
+            if (map->grid[y][x] == '0')
+            {
+                if (bad_neighbor(map, y, x))
+                    return (1);
+            }
+            else if (map->grid[y][x] == 'N' || map->grid[y][x] == 'S'
+                || map->grid[y][x] == 'E' || map->grid[y][x] == 'W')
+            {
+                if (bad_neighbor(map, y, x))
+                    return (1);
+                p->x = x + 0.5;
+                p->y = y + 0.5;
+                if (map->grid[y][x] == 'N')
+                    p->dir = -M_PI_2;
+                else if (map->grid[y][x] == 'S')
+                    p->dir = M_PI_2;
+                else if (map->grid[y][x] == 'E')
+                    p->dir = 0;
+                else
+                    p->dir = M_PI;
+                map->grid[y][x] = '0';
+            }
+            x++;
+        }
+        y++;
+    }
+    if (p->x < 0)
+        return  (err("no player"));
+    p->plane_x = -sin(p->dir) * 0.66;
+    p->plane_y = cos(p->dir) * 0.66;
+    return (0);
+}
+/* === ./srcs/parse/parse_color.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   parse_color.c                                      :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: michel <michel@student.42.fr>              +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2025/11/12 20:36:52 by michel            #+#    #+#             */
+/*   Updated: 2025/11/17 13:50:57 by michel           ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "../../includes/cub3d.h"
+#include "../../includes/parse.h"
+
+static int parse_one(const char *s, int *out)
+{
+    int ok;
+    int v;
+
+    v = ft_atoi_strict(s, &ok);
+    if (!ok || v < 0 || v > 255)
+        return (1);
+    *out = v;
+    return (0);
+}
+
+int parse_color_line(const char *s, int *out_color)
+{
+    char    *tmp;
+    char    *p1;
+    char    *p2;
+    int     r, g, b;
+
+    tmp = ft_strdup(s);
+    if (!tmp)
+        return (err("malloc"));
+    p1 = tmp;
+    p2 = tmp;
+    while (*p2 && *p2 != ',')
+        p2++;
+    if (!*p2)
+        return (free(tmp), err("bad color"));
+    *p2++ = '\0';
+    if (parse_one(p1, &r))
+        return (free(tmp), err("bad r"));
+    p1 = p2;
+    while (*p2 && *p2 != ',')
+        p2++;
+    if (!*p2)
+		return (free(tmp), err("bad color"));
+	*p2++ = '\0';
+	if (parse_one(p1, &g))
+		return (free(tmp), err("bad g"));
+	if (parse_one(p2, &b))
+		return (free(tmp), err("bad b"));
+	free(tmp);
+	*out_color = (r << 16) | (g << 8) | b;
+	return (0);
+}
+/* === ./srcs/parse/parse_element.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   parse_element.c                                    :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: michel <michel@student.42.fr>              +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2025/11/12 18:06:08 by michel            #+#    #+#             */
+/*   Updated: 2025/11/17 13:53:27 by michel           ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "../../includes/cub3d.h"
+#include "../../includes/parse.h"
+
+static int  assign_tex(t_game *g, int idx, const char *path)
+{
+    if (g->tex_path[idx])
+        return (err("texture defined twice"));
+    g->tex_path[idx] = ft_strdup(path);
+    if (!g->tex_path[idx])
+        return (err("malloc"));
+    return (0);
+}
+
+int parse_elements(t_game *g, char **lines, int *i)
+{
+    char *line;
+    
+    while (lines[*i])
+    {
+        line = ft_strtrim_spaces(lines[*i]);
+        if (!line || line[0] == '\0')
+        {
+            (*i)++;
+            continue;
+        }
+        if (!ft_strncmp(line, "NO ", 3))
+        {
+            if (assign_tex((g), TEX_N, line + 3))
+            {
+                free(line);
+                return (1);
+            }
+        }
+        else if (!ft_strncmp(line, "SO ", 3))
+        {
+            if (assign_tex(g, TEX_S, line + 3))
+            {
+                free(line);
+                return (1);
+            }
+        }
+        else if (!ft_strncmp(line, "WE ", 3))
+        {
+            if (assign_tex(g, TEX_W, line + 3))
+            {
+                free(line);
+                return (1);
+            }
+        }
+        else if (!ft_strncmp(line, "EA ", 3))
+        {
+            if (assign_tex(g, TEX_E, line + 3))
+            {
+                free(line);
+                return (1);
+            }
+        }
+        else if (!ft_strncmp(line, "F ", 2))
+        {
+            if (parse_color_line(line + 2, &g->floor_color))
+            {
+                free(line);
+                return (1);
+            }
+        }
+        else if (!ft_strncmp(line, "C ", 2))
+        {
+            if (parse_color_line(line + 2, &g->ceil_color))
+            {
+                free(line);
+                return (1);
+            }
+        }
+        else
+            break;
+        free(line);
+        (*i)++;
+    }
+    if (!g->tex_path[TEX_N] || !g->tex_path[TEX_S]
+        || !g->tex_path[TEX_W] || !g->tex_path[TEX_E])
+        return (err("missing texture"));
+    if (g->floor_color < 0 || g->ceil_color < 0)
+        return (err("missing color"));
+    return (0);
+}
+/* === ./srcs/parse/parse.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   parse.c                                            :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: michel <michel@student.42.fr>              +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2025/11/12 17:47:10 by michel            #+#    #+#             */
+/*   Updated: 2025/11/17 13:54:24 by michel           ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "../../includes/cub3d.h"
+#include "../../includes/parse.h"
+
+int parse_cub(t_game *g, const char *path)
+{
+    int fd;
+    char **lines;
+    int i;
+
+    fd = open(path, O_RDONLY);
+    if (fd < 0)
+        return (err("cannot open .cub"));
+    lines = split_lines_from_fd(fd, NULL);
+    close(fd);
+    if (!lines)
+        return (err("cannot read .cub"));
+    i = 0;
+    if (parse_elements(g, lines, &i))
+        return (free_lines(lines), 1);
+    if (parse_map(g, lines, i))
+        return (free_lines(lines), 1);
+    if (rectify_map(&g->map))
+        return (free_lines(lines), err("map rectify_failed"));
+    if (check_map_closed(&g->map, &g->player))
+        return (free_lines(lines), err("map not closed"));
+    return (0);
+}
+/* === ./srcs/parse/parse_map.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   parse_map.c                                        :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: michel <michel@student.42.fr>              +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2025/11/13 18:01:38 by michel            #+#    #+#             */
+/*   Updated: 2025/11/17 13:55:13 by michel           ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "../../includes/cub3d.h"
+#include "../../includes/parse.h"
+
+static int is_map_line(const char *s)
+{
+    while (*s == ' ' || *s == '\t')
+        s++;
+    if (*s == '1' || *s == '0' || *s == 'N' 
+        || *s == 'S' || *s == 'E' || *s == 'W')
+        return (1);
+    return (0);
+}
+
+int parse_map(t_game *g, char **lines, int start)
+{
+    int count;
+    int y;
+
+    count = 0;
+    while (lines[start + count] && is_map_line(lines[start + count]))
+        count++;
+    if (count == 0)
+        return (err("no map"));
+    g->map.grid = (char **)malloc(sizeof(char *) * count);
+    if (!g->map.grid)
+        return (err("malloc"));
+    g->map.height = count;
+    g->map.width = 0;
+    y = 0;
+    while (y < count)
+    {
+        g->map.grid[y] = ft_strdup(lines[start + y]);
+        if (!g->map.grid[y])
+            return (err("malloc"));
+        if ((int)ft_strlen(g->map.grid[y]) > g->map.width)
+            g->map.width = ft_strlen(g->map.grid[y]);
+        y++;
+    }
+    return (0);
+}
+
+int	rectify_map(t_map *map)
+{
+	int		y;
+	char	*new;
+	int		x;
+
+	y = 0;
+	while (y < map->height)
+	{
+		if ((int)ft_strlen(map->grid[y]) < map->width)
+		{
+			new = (char *)malloc(map->width + 1);
+			if (!new)
+				return (1);
+			x = 0;
+			while (map->grid[y][x])
+			{
+				new[x] = map->grid[y][x];
+				x++;
+			}
+			while (x < map->width)
+				new[x++] = ' ';
+			new[x] = '\0';
+			free(map->grid[y]);
+			map->grid[y] = new;
+		}
+		y++;
+	}
+	return (0);
+}
+/* === ./srcs/game_destroy.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   game_destroy.c                                     :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: michel <michel@student.42.fr>              +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2025/11/12 17:24:16 by michel            #+#    #+#             */
+/*   Updated: 2025/11/17 16:41:23 by michel           ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "../includes/cub3d.h"
+
+static void destroy_texture(t_game *g)
+{
+    int i;
+
+    i = 0;
+    while (i < TEX_COUNT)
+    {
+        if (g->tex[i].img)
+            mlx_destroy_image(g->mlx, g->tex[i].img);
+        if (g->tex_path[i])
+            free(g->tex_path[i]);
+        i++;
+    }
+}
+
+void    game_destroy(t_game *g)
+{
+    int y;
+
+    if (g->map.grid)
+    {
+        y = 0;
+        while (y < g->map.height)
+        {
+            free(g->map.grid[y]);
+            y++;
+        }
+        free(g->map.grid);
+    }
+    if (g->zbuffer)
+        free(g->zbuffer);
+    destroy_texture(g);
+    if (g->frame)
+        mlx_destroy_image(g->mlx, g->frame);
+    if (g->win)
+        mlx_destroy_window(g->mlx, g->win);
+    if (g->sprite_tex.img)
+		mlx_destroy_image(g->mlx, g->sprite_tex.img);
+    if (g->mlx)
+    {
+        mlx_destroy_display(g->mlx);
+        free(g->mlx);
+    }
+}
+/* === ./srcs/game_loop.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   game_loop.c                                        :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: michel <michel@student.42.fr>              +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2025/11/17 12:31:25 by michel            #+#    #+#             */
+/*   Updated: 2025/11/17 15:12:38 by michel           ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "../includes/cub3d.h"
+#include "../includes/render.h"
+
+int loop_hook(t_game *g)
+{
+    handle_input(g);
+    render_frame(g);
+    return (0);
+}
+
+void    game_loop(t_game *g)
+{
+    mlx_hook(g->win, 2, 1L << 0, key_press, g);
+    mlx_hook(g->win, 3, 1L << 1, key_release, g);
+    mlx_hook(g->win, 17, 0, close_win, g);
+    mlx_loop_hook(g->mlx, loop_hook, g);
+    mlx_loop(g->mlx);
+}
+/* === ./srcs/bonus/parse_cub_bonus.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   parse_cub_bonus.c                                  :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: michel <michel@student.42.fr>              +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2025/11/17 18:28:55 by michel            #+#    #+#             */
+/*   Updated: 2025/11/17 18:32:34 by michel           ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "../../includes/cub3d.h"
+#include "../../includes/parse.h"
+#include "../../includes/sprite_bonus.h"
+
+int parse_cub_bonus(t_game *g, const char *path)
+{
+    int fd;
+    char **lines;
+    int i;
+
+    fd = open(path, O_RDONLY);
+    if (fd < 0)
+        return (err("cannot open .cub"));
+    lines = split_lines_from_fd(fd, NULL);
+    close(fd);
+    if (!lines)
+        return (err("cannot read .cub"));
+    i = 0;
+    if (parse_elements(g, lines, &i))
+        return (free_lines(lines), 1);
+    if (parse_map(g, lines, i))
+        return (free_lines(lines), 1);
+    if (rectify_map(&g->map))
+        return (free_lines(lines), err("map rectify_failed"));
+    init_sprites_from_map(g);
+    if (check_map_closed(&g->map, &g->player))
+        return (free_lines(lines), err("map not closed"));
+    return (0);
+}
+/* === ./srcs/bonus/sprite_bonus.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   sprite_bonus.c                                     :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: michel <michel@student.42.fr>              +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2025/11/17 18:15:47 by michel            #+#    #+#             */
+/*   Updated: 2025/11/18 09:46:10 by michel           ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "../../includes/cub3d.h"
+#include "../../includes/sprite_bonus.h"
+
+static int add_sprite(t_game *g, int x, int y)
+{
+    t_sprite *sprite;
+
+    if (g->sprite_count >= MAX_SPRITES)
+        return (err("too many sprite"));
+    sprite = &g->sprites[g->sprite_count];
+    sprite->x = x +0.5;
+    sprite->y = y + 0.5;
+    sprite->dist = 0.0;
+    sprite->anim_frame = 0;
+    sprite->type = (x + y) % 4;
+    g->sprite_count++;
+    return (0);
+}
+
+void    init_sprites_from_map(t_game *g)
+{
+    int y;
+    int x;
+
+    g->sprite_count = 0;
+    y = 0;
+    while (y < g->map.height)
+    {
+        x = 0;
+        while (x < g->map.width)
+        {
+            if (g->map.grid[y][x] == '2')
+            {
+                if (add_sprite(g, x, y))
+                    return ;
+                g->map.grid[y][x] = '0';
+            }
+            x++;
+        }
+        y++;
+    }
+}
+/* === ./srcs/bonus/main_bonus.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   main_bonus.c                                       :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: michel <michel@student.42.fr>              +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2025/11/17 12:11:45 by michel            #+#    #+#             */
+/*   Updated: 2025/11/17 19:48:36 by michel           ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "../../includes/cub3d.h"
+#include "../../includes/sprite_bonus.h"
+
+int main(int ac, char **av)
+{
+    t_game g;
+
+    if (ac != 2)
+        return (err("Usage: ./cub3d map.cub"));
+    game_init_defaults(&g);
+    if (parse_cub_bonus(&g, av[1]))
+        return (game_destroy(&g), 1);
+    if (game_init_mlx(&g))
+        return (game_destroy(&g), 1);
+    game_loop_bonus(&g);
+    game_destroy(&g);
+    return (0);
+}
+/* === ./srcs/bonus/sprite_ai_bonus.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   sprite_ai_bonus.c                                  :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: michel <michel@student.42.fr>              +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2025/11/18  */
+/*   Updated: 2025/11/18  */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "../../includes/cub3d.h"
+#include "../../includes/sprite_bonus.h"
+
+static int	cell_blocked(t_game *g, int my, int mx)
+{
+	if (my < 0 || my >= g->map.height || mx < 0 || mx >= g->map.width)
+		return (1);
+	return (g->map.grid[my][mx] == '1');
+}
+
+static int	sprite_collides(t_game *g, double y, double x)
+{
+	double	r;
+
+	r = SPRITE_RADIUS;
+	if (cell_blocked(g, (int)(y - r), (int)(x - r)))
+		return (1);
+	if (cell_blocked(g, (int)(y - r), (int)(x + r)))
+		return (1);
+	if (cell_blocked(g, (int)(y + r), (int)(x - r)))
+		return (1);
+	if (cell_blocked(g, (int)(y + r), (int)(x + r)))
+		return (1);
+	return (0);
+}
+
+static void	dir_to_vec(int dir, double *dx, double *dy)
+{
+	if (dir == 0)
+	{
+		*dx = 1.0;
+		*dy = 0.0;
+	}
+	else if (dir == 1)
+	{
+		*dx = -1.0;
+		*dy = 0.0;
+	}
+	else if (dir == 2)
+	{
+		*dx = 0.0;
+		*dy = 1.0;
+	}
+	else
+	{
+		*dx = 0.0;
+		*dy = -1.0;
+	}
+}
+
+static void	move_sprite_wander(t_game *g, t_sprite *s)
+{
+	double	dx;
+	double	dy;
+	double	speed;
+	double	nx;
+	double	ny;
+	int		dir;
+	int		tries;
+
+	speed = 0.03;
+	tries = 0;
+	while (tries < 4)
+	{
+		dir = s->type % 4;
+		dir_to_vec(dir, &dx, &dy);
+		nx = s->x + dx * speed;
+		ny = s->y + dy * speed;
+		if (!sprite_collides(g, ny, nx))
+		{
+			s->x = nx;
+			s->y = ny;
+			return ;
+		}
+		s->type++;
+		tries++;
+	}
+}
+
+void	update_sprites_ai(t_game *g)
+{
+	int	i;
+
+	i = 0;
+	while (i < g->sprite_count)
+	{
+		move_sprite_wander(g, &g->sprites[i]);
+		i++;
+	}
+}
+/* === ./srcs/bonus/sprite_draw_bonus.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   sprite_draw_bonus.c                                :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: michel <michel@student.42.fr>              +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2025/11/17 18:57:00 by michel            #+#    #+#             */
+/*   Updated: 2025/11/18 11:52:02 by michel           ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "../../includes/cub3d.h"
+#include "../../includes/sprite_bonus.h"
+
+static int	get_dir_index(t_game *g, t_sprite *s)
+{
+	double	mv_x;
+	double	mv_y;
+	double	fx;
+	double	fy;
+	double	rx;
+	double	ry;
+	double	mv_forward;
+	double	mv_right;
+	int		dir;
+
+	/* vecteur de déplacement du sprite d’après s->type (même logique que dir_to_vec) */
+	dir = s->type % 4;
+	if (dir == 0)
+	{
+		mv_x = 1.0;
+		mv_y = 0.0;
+	}
+	else if (dir == 1)
+	{
+		mv_x = -1.0;
+		mv_y = 0.0;
+	}
+	else if (dir == 2)
+	{
+		mv_x = 0.0;
+		mv_y = 1.0;
+	}
+	else
+	{
+		mv_x = 0.0;
+		mv_y = -1.0;
+	}
+
+	/* base caméra : forward = direction du joueur, right = plane */
+	fx = cos(g->player.dir);
+	fy = sin(g->player.dir);
+	rx = g->player.plane_x;
+	ry = g->player.plane_y;
+
+	/* composantes du mouvement dans la base caméra */
+	mv_forward = mv_x * fx + mv_y * fy;
+	mv_right = mv_x * rx + mv_y * ry;
+
+	/* on choisit la ligne en fonction de la direction à l’écran */
+	if (fabs(mv_forward) >= fabs(mv_right))
+	{
+		if (mv_forward >= 0.0)
+			return (SPRITE_ROW_BACK);
+		else
+			return (SPRITE_ROW_FRONT);
+	}
+	else
+	{
+		if (mv_right > 0.0)
+			return (SPRITE_ROW_LEFT);
+		else
+			return (SPRITE_ROW_RIGHT);
+	}
+}
+
+static void	sprite_project(t_game *g, t_sprite *s, t_sprite_proj *p)
+{
+	double	dir_x;
+	double	dir_y;
+	double	inv_det;
+	double	base_h;
+	double	bottom;
+	double	ratio;
+
+	dir_x = cos(g->player.dir);
+	dir_y = sin(g->player.dir);
+	p->sprite_x = s->x - g->player.x;
+	p->sprite_y = s->y - g->player.y;
+	inv_det = 1.0 / (g->player.plane_x * dir_y
+			- dir_x * g->player.plane_y);
+	p->transform_x = inv_det * (dir_y * p->sprite_x
+			- dir_x * p->sprite_y);
+	p->transform_y = inv_det * (-g->player.plane_y * p->sprite_x
+			+ g->player.plane_x * p->sprite_y);
+	p->screen_x = (int)((g->scr_w / 2.0)
+			* (1.0 + p->transform_x / p->transform_y));
+	base_h = fabs((double)g->scr_h / p->transform_y);
+	ratio = (double)g->sprite_tex.frame_w / (double)g->sprite_tex.frame_h;
+	p->height = (int)(base_h * SPRITE_SCALE);
+	p->width = (int)(p->height * ratio);
+	bottom = g->scr_h / 2.0 + base_h / 2.0;
+	p->draw_end_y = (int)bottom;
+	if (p->draw_end_y >= g->scr_h)
+		p->draw_end_y = g->scr_h - 1;
+	p->draw_start_y = p->draw_end_y - p->height;
+	if (p->draw_start_y < 0)
+		p->draw_start_y = 0;
+	p->draw_start_x = -p->width / 2 + p->screen_x;
+	if (p->draw_start_x < 0)
+		p->draw_start_x = 0;
+	p->draw_end_x = p->width / 2 + p->screen_x;
+	if (p->draw_end_x >= g->scr_w)
+		p->draw_end_x = g->scr_w - 1;
+}
+
+static void	sprite_draw_stripe(t_game *g, t_sprite_proj *p,
+				t_sprite *s, int stripe)
+{
+	int		tex_x;
+	int		y;
+	int		tex_y;
+	int		color;
+	int		row;
+	int		col;
+	int		frame_x;
+	int		frame_y;
+	int		screen_h;
+	double	step;
+	double	tex_pos;
+
+	if (p->transform_y <= 0.0 || stripe < 0 || stripe >= g->scr_w)
+		return ;
+	if (p->transform_y >= g->zbuffer[stripe])
+		return ;
+	tex_x = (int)((stripe - p->draw_start_x)
+			* g->sprite_tex.frame_w / p->width);
+	if (tex_x < 0 || tex_x >= g->sprite_tex.frame_w)
+		return ;
+	/* lignes = direction, colonnes = animation */
+	row = get_dir_index(g, s);
+	col = s->anim_frame;
+	if (col < 0)
+		col = 0;
+	if (col >= g->sprite_tex.frames)
+		col = g->sprite_tex.frames - 1;
+	screen_h = p->draw_end_y - p->draw_start_y + 1;
+	step = (double)g->sprite_tex.frame_h / (double)screen_h;
+	tex_pos = 0.0;
+	y = p->draw_start_y;
+	while (y <= p->draw_end_y)
+	{
+		tex_y = (int)tex_pos;
+		if (tex_y < 0)
+			tex_y = 0;
+		if (tex_y >= g->sprite_tex.frame_h)
+			tex_y = g->sprite_tex.frame_h - 1;
+		frame_x = col * g->sprite_tex.frame_w + tex_x;
+		frame_y = row * g->sprite_tex.frame_h + tex_y;
+		color = g->sprite_tex.data[frame_y * g->sprite_tex.w + frame_x];
+		if ((color & 0x00FFFFFF) != 0x00000000)
+			g->frame_data[y * g->scr_w + stripe] = color;
+		tex_pos += step;
+		y++;
+	}
+}
+
+static void	draw_one_sprite(t_game *g, t_sprite *s)
+{
+	t_sprite_proj	p;
+	int				stripe;
+
+	sprite_project(g, s, &p);
+	if (p.transform_y <= 0.0001)
+		return ;
+	stripe = p.draw_start_x;
+	while (stripe <= p.draw_end_x)
+	{
+		sprite_draw_stripe(g, &p, s, stripe);
+		stripe++;
+	}
+}
+
+void	draw_sprites(t_game *g)
+{
+	int	i;
+
+	if (!g->sprite_tex.img || g->sprite_count <= 0)
+		return ;
+	update_sprites_from_player(g);
+	i = 0;
+	while (i < g->sprite_count)
+	{
+		draw_one_sprite(g, &g->sprites[i]);
+		i++;
+	}
+}
+/* === ./srcs/bonus/sprite_update_bonus.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   sprite_update_bonus.c                              :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: michel <michel@student.42.fr>              +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2025/11/17 18:39:12 by michel            #+#    #+#             */
+/*   Updated: 2025/11/18 09:38:17 by michel           ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "../../includes/cub3d.h"
+#include "../../includes/sprite_bonus.h"
+
+static void	swap_sprites(t_sprite *a, t_sprite *b)
+{
+	t_sprite	tmp;
+
+	tmp = *a;
+	*a = *b;
+	*b = tmp;
+}
+
+static void	animate_sprites(t_game *g)
+{
+	int	i;
+
+	g->sprite_anim_tick++;
+	if (g->sprite_anim_tick < 12)
+		return ;
+	g->sprite_anim_tick = 0;
+	i = 0;
+	while (i < g->sprite_count)
+	{
+		g->sprites[i].anim_frame++;
+		if (g->sprites[i].anim_frame >= 3)
+			g->sprites[i].anim_frame = 0;
+		i++;
+	}
+}
+
+void	update_sprites_from_player(t_game *g)
+{
+	int		i;
+	int		j;
+	double	dx;
+	double	dy;
+
+    update_sprites_ai(g);
+	i = 0;
+	while (i < g->sprite_count)
+	{
+		dx = g->sprites[i].x - g->player.x;
+		dy = g->sprites[i].y - g->player.y;
+		g->sprites[i].dist = dx * dx + dy * dy;
+		i++;
+	}
+	i = 0;
+	while (i < g->sprite_count - 1)
+	{
+		j = i + 1;
+		while (j < g->sprite_count)
+		{
+			if (g->sprites[i].dist < g->sprites[j].dist)
+				swap_sprites(&g->sprites[i], &g->sprites[j]);
+			j++;
+		}
+		i++;
+	}
+	animate_sprites(g);
+}
+/* === ./srcs/bonus/game_loop_bonus.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   game_loop_bonus.c                                  :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: michel <michel@student.42.fr>              +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2025/11/17 19:37:20 by michel            #+#    #+#             */
+/*   Updated: 2025/11/17 19:38:49 by michel           ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "../../includes/cub3d.h"
+#include "../../includes/sprite_bonus.h"
+
+int loop_hook_bonus(t_game *g)
+{
+    handle_input(g);
+    render_frame_bonus(g);
+    return (0);
+}
+
+void game_loop_bonus(t_game *g)
+{
+    mlx_hook(g->win, 2, 1L << 0, key_press, g);
+    mlx_hook(g->win, 3, 1L << 1, key_release, g);
+    mlx_hook(g->win, 17, 0, close_win, g);
+    mlx_loop_hook(g->mlx, loop_hook_bonus, g);
+    mlx_loop(g->mlx);
+}
+/* === ./srcs/bonus/render_frame_bonus.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   render_frame_bonus.c                               :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: michel <michel@student.42.fr>              +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2025/11/17 19:07:49 by michel            #+#    #+#             */
+/*   Updated: 2025/11/17 19:24:58 by michel           ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "../../includes/cub3d.h"
+#include "../../includes/render.h"
+#include "../../includes/sprite_bonus.h"
+
+void render_frame_bonus(t_game *g)
+{
+    int x;
+
+    x = 0;
+    while (x < g->scr_w)
+    {
+        raycast_column(g, x);
+        x++;
+    }
+    draw_sprites(g);
+    mlx_put_image_to_window(g->mlx, g->win, g->frame, 0, 0);
+}
+/* === ./srcs/render/render_frame.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   render_frame.c                                     :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: michel <michel@student.42.fr>              +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2025/11/15 13:27:45 by michel            #+#    #+#             */
+/*   Updated: 2025/11/17 19:24:36 by michel           ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "../../includes/cub3d.h"
+#include "../../includes/render.h"
+
+void render_frame(t_game *g)
+{
+    int x;
+
+    x = 0;
+    while (x < g->scr_w)
+    {
+        raycast_column(g, x);
+        x++;
+    }
+    mlx_put_image_to_window(g->mlx, g->win, g->frame, 0, 0);
+}
+/* === ./srcs/render/raycast.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   raycast.c                                          :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: michel <michel@student.42.fr>              +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2025/11/13 19:08:53 by michel            #+#    #+#             */
+/*   Updated: 2025/11/17 14:02:07 by michel           ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "../../includes/cub3d.h"
+#include "../../includes/render.h"
+
+static void ray_init(t_game *g, int x, t_ray *r)
+{
+    r->camera_x = 2.0 * x / (double)g->scr_w - 1.0;
+    r->ray_dir_x = cos(g->player.dir) + g->player.plane_x * r->camera_x;
+    r->ray_dir_y = sin(g->player.dir) + g->player.plane_y * r->camera_x;
+    r->map_x = (int)g->player.x;
+    r->map_y = (int)g->player.y;
+    r->delta_dist_x = (r->ray_dir_x == 0.0) ? BIG : fabs(1.0 / r->ray_dir_x);
+    r->delta_dist_y = (r->ray_dir_y == 0.0) ? BIG : fabs(1.0 / r->ray_dir_y);
+    r->hit = 0;
+}
+
+static void	ray_step_setup(t_game *g, t_ray *r)
+{
+	if (r->ray_dir_x < 0.0)
+	{
+		r->step_x = -1;
+		r->side_dist_x = (g->player.x - r->map_x) * r->delta_dist_x;
+	}
+	else
+	{
+		r->step_x = 1;
+		r->side_dist_x = (r->map_x + 1.0 - g->player.x) * r->delta_dist_x;
+	}
+	if (r->ray_dir_y < 0.0)
+	{
+		r->step_y = -1;
+		r->side_dist_y = (g->player.y - r->map_y) * r->delta_dist_y;
+	}
+	else
+	{
+		r->step_y = 1;
+		r->side_dist_y = (r->map_y + 1.0 - g->player.y) * r->delta_dist_y;
+	}
+}
+
+static int	inside_map(t_game *g, int mx, int my)
+{
+	if (my < 0 || my >= g->map.height)
+		return (0);
+	if (mx < 0 || mx >= g->map.width)
+		return (0);
+	return (1);
+}
+
+static void	ray_dda(t_game *g, t_ray *r)
+{
+	while (!r->hit)
+	{
+		if (r->side_dist_x < r->side_dist_y)
+		{
+			r->side_dist_x += r->delta_dist_x;
+			r->map_x += r->step_x;
+			r->side = 0;
+		}
+		else
+		{
+			r->side_dist_y += r->delta_dist_y;
+			r->map_y += r->step_y;
+			r->side = 1;
+		}
+		if (!inside_map(g, r->map_x, r->map_y))
+			break ;
+		if (g->map.grid[r->map_y][r->map_x] == '1')
+			r->hit = 1;
+	}
+}
+
+static void	ray_finish_geometry(t_game *g, t_ray *r)
+{
+	if (r->hit == 0)
+	{
+		r->perp_wall_dist = BIG;
+		r->line_h = 0;
+		r->draw_start = 0;
+		r->draw_end = 0;
+		return ;
+	}
+	if (r->side == 0)
+		r->perp_wall_dist = (r->map_x - g->player.x
+				+ (1 - r->step_x) / 2.0) / r->ray_dir_x;
+	else
+		r->perp_wall_dist = (r->map_y - g->player.y
+				+ (1 - r->step_y) / 2.0) / r->ray_dir_y;
+	r->line_h = (int)(g->scr_h / r->perp_wall_dist);
+	r->draw_start = -r->line_h / 2 + g->scr_h / 2;
+	if (r->draw_start < 0)
+		r->draw_start = 0;
+	r->draw_end = r->line_h / 2 + g->scr_h / 2;
+	if (r->draw_end >= g->scr_h)
+		r->draw_end = g->scr_h - 1;
+	if (r->side == 0)
+		r->wall_x = g->player.y + r->perp_wall_dist * r->ray_dir_y;
+	else
+		r->wall_x = g->player.x + r->perp_wall_dist * r->ray_dir_x;
+	r->wall_x -= floor(r->wall_x);
+}
+
+void	raycast_column(t_game *g, int x)
+{
+	t_ray	r;
+
+	ray_init(g, x, &r);
+	ray_step_setup(g, &r);
+	ray_dda(g, &r);
+	ray_finish_geometry(g, &r);
+	draw_wall_stripe(g, x, &r);
+	g->zbuffer[x] = r.perp_wall_dist;
+}
+/* === ./srcs/render/raycast_texture.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   raycast_texture.c                                  :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: michel <michel@student.42.fr>              +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2025/11/15 12:19:03 by michel            #+#    #+#             */
+/*   Updated: 2025/11/17 15:40:23 by michel           ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "../../includes/cub3d.h"
+#include "../../includes/render.h"
+
+static t_tex    *select_tex(t_game *game, t_ray *r)
+{
+    if (r->side == 0)
+    {
+        if (r->ray_dir_x > 0.0)
+            return (&game->tex[TEX_W]);
+        return (&game->tex[TEX_E]);
+    }
+    if (r->ray_dir_y > 0.0)
+        return (&game->tex[TEX_N]);
+    return (&game->tex[TEX_S]);
+}
+
+static void put_ceil_floor(t_game *game, int x, int to, int from, int color)
+{
+    int y;
+
+    y = from;
+    while (y < to)
+    {
+        game->frame_data[y * game->scr_w + x] = color;
+        y++;
+    }
+}
+
+void    draw_wall_stripe(t_game *g, int x, t_ray *r)
+{
+    t_tex   *tex;
+    double  step;
+    double  tex_pos;
+    int     y;
+    int     tex_y;
+    int     color;
+
+    put_ceil_floor(g, x, r->draw_start, 0, g->ceil_color);
+    tex = select_tex(g, r);
+    r->tex_x = (int)(r->wall_x * (double)tex->w);
+    if (r->side == 0 && r->ray_dir_x > 0.0)
+        r->tex_x = tex->w - r->tex_x - 1;
+    if (r->side == 1 && r->ray_dir_y < 0.0)
+        r->tex_x = tex->w - r->tex_x - 1;
+    step = 1.0 * tex->h / (double)r->line_h;
+    tex_pos = (r->draw_start - (double)g->scr_h / 2 + (double)r->line_h / 2) * step;
+    y = r->draw_start;
+    while (y <= r->draw_end)
+    {
+        tex_y = (int)tex_pos;
+        if (tex_y < 0)
+            tex_y = 0;
+        if (tex_y >= tex->h)
+            tex_y = tex->h - 1;
+        tex_pos += step;
+        color = tex->data[tex->w * tex_y + r->tex_x];
+        g->frame_data[y * g->scr_w + x] = color;
+        y++;
+    }
+    put_ceil_floor(g, x, g->scr_h, r->draw_end + 1, g->floor_color);
+}
+/* === ./srcs/main.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   main.c                                             :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: michel <michel@student.42.fr>              +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2025/11/17 12:11:45 by michel            #+#    #+#             */
+/*   Updated: 2025/11/17 19:28:34 by michel           ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "../includes/cub3d.h"
+
+int main(int ac, char **av)
+{
+    t_game g;
+
+    if (ac != 2)
+        return (err("Usage: ./cub3d map.cub"));
+    game_init_defaults(&g);
+    if (parse_cub(&g, av[1]))
+        return (game_destroy(&g), 1);
+    if (game_init_mlx(&g))
+        return (game_destroy(&g), 1);
+    game_loop(&g);
+    game_destroy(&g);
+    return (0);
+}
+/* === ./srcs/game_init.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   game_init.c                                        :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: michel <michel@student.42.fr>              +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2025/11/12 17:05:55 by michel            #+#    #+#             */
+/*   Updated: 2025/11/17 21:02:42 by michel           ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "../includes/cub3d.h"
+
+void game_init_defaults(t_game *g)
+{
+    int i;
+
+    g->mlx = NULL;
+    g->win = NULL;
+    g->frame = NULL;
+    g->frame_data = NULL;
+    g->scr_w = SCREEN_W;
+    g->scr_h = SCREEN_H;
+    i = 0;
+    while (i < TEX_COUNT)
+    {
+        g->tex_path[i] = NULL;
+        g->tex[i].img = NULL;
+        i++;
+    }
+    g->sprite_tex.img = NULL;
+	g->sprite_tex.data = NULL;
+	g->sprite_tex.w = 0;
+	g->sprite_tex.h = 0;
+	g->sprite_tex.bpp = 0;
+	g->sprite_tex.line_len = 0;
+	g->sprite_tex.endian = 0;
+    g->sprite_tex.frame_w = 0;
+    g->sprite_tex.frame_h = 0;
+    g->sprite_tex.frames = 0;
+    g->floor_color = -1;
+    g->ceil_color = -1;
+    g->map.grid = NULL;
+    g->map.width = 0;
+    g->map.height = 0;
+    g->player.x = -1;
+    g->player.y = -1;
+    g->player.dir = 0;
+    g->player.plane_x = 0;
+    g->player.plane_y = 0;
+    g->sprite_count = 0;
+    g->sprite_anim_tick = 0;
+    g->zbuffer = NULL;
+    g->key_w = 0;
+    g->key_s = 0;
+    g->key_a = 0;
+    g->key_d = 0;
+    g->key_r = 0;
+    g->key_l = 0;
+    g->sprite_count = 0;
+}
+/* === ./srcs/utils/utils.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   utils.c                                            :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: michel <michel@student.42.fr>              +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2025/11/12 20:56:31 by michel            #+#    #+#             */
+/*   Updated: 2025/11/17 14:05:39 by michel           ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "../../includes/cub3d.h"
+
+char    *ft_strtrim_spaces(char *s)
+{
+    int start;
+    int end;
+    int len;
+    char *out;
+    int i;
+
+    if (!s)
+        return (NULL);
+    start = 0;
+    while (s[start] == ' ' || s[start] == '\t' || s[start] == '\n'
+        || s[start] == '\r' || s[start] == '\v' || s[start] == '\f')
+        start++;
+    end = ft_strlen(s);
+    while (end > start && (s[end - 1] == ' ' || s[end - 1] == '\t'
+            || s[end -1] == '\n' || s[end - 1] == '\r'
+            || s[end - 1] == '\v' || s[end - 1] == '\f'))
+        end--;
+    len = end - start;
+    out = malloc(len + 1);
+    if (!out)
+        return (NULL);
+    i = 0;
+    while (i < len)
+    {
+        out[i] = s[start + i];
+        i++;
+    }
+    out[i] = '\0';
+    return (out);
+}
+
+int ft_atoi_strict(const char *s, int *ok)
+{
+    long    res;
+    int     sign;
+    int     i;
+
+    if (!s || !ok)
+        return (0);
+    *ok = 1;
+    i = 0;
+    while (s[i] == ' ' || s[i] == '\t' || s[i] == '\n'
+            || s[i] == '\r' || s[i] == '\v' || s[i] == '\f')
+        i++;
+    sign = 1;
+    if (s[i] == '-' || s[i] == '+')
+    {
+        if (s[i] == '-')
+            sign = -1;
+        i++;
+    }
+    if (s[i] < '0' || s[i] > '9')
+        return (*ok = 0, 0);
+    res = 0;
+    while (s[i] >= '0' && s[i] <= '9')
+    {
+        res = res * 10 + (s[i] - '0');
+        if (res * sign > INT_MAX || res * sign < INT_MIN)
+            return (*ok = 0, 0);
+        i++;
+    }
+    if (s[i] != '\0')
+        return (*ok = 0, 0);
+    return ((int)(res * sign));
+}
+/* === ./srcs/utils/read_file.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   read_file.c                                        :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: michel <michel@student.42.fr>              +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2025/11/12 18:48:11 by michel            #+#    #+#             */
+/*   Updated: 2025/11/17 14:09:52 by michel           ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "../../includes/cub3d.h"
+
+static char *read_all(int fd)
+{
+    char buf[1024];
+    char *res;
+    char *tmp;
+    ssize_t r;
+    size_t oldlen;
+    ssize_t j;
+    size_t i;
+
+    res = NULL;
+    while ((r = read(fd, buf, sizeof(buf))) > 0)
+    {
+        if (res)
+            oldlen = ft_strlen(res);
+        else
+            oldlen = 0;
+        tmp = malloc(oldlen + r + 1);
+        if (!tmp)
+            return (free(res), NULL);
+        i = 0;
+        while (i < oldlen)
+        {
+            tmp[i] = res[i];
+            i++;
+        }
+        j = 0;
+        while (j < r)
+        {
+            tmp[oldlen + j] = buf[j];
+            j++;
+        }
+        tmp[oldlen + r] = '\0';
+        free(res);
+        res = tmp;
+    }
+    return (res);
+}
+
+char    **split_lines_from_fd(int fd, int *out_count)
+{
+    char *all;
+    char **lines;
+    int count;
+    int i;
+    int j;
+    int k;
+    int x;
+    
+    all = read_all(fd);
+    if (!all)
+        return (NULL);
+    count = 1;
+    i = 0;
+    while (all[i])
+    {
+        if (all[i++] == '\n')
+            count++;
+    }
+    lines = malloc(sizeof(char *) * (count + 1));
+    if (!lines)
+        return (free(all), NULL);
+    i = 0; k = 0;
+    while (all[i])
+    {
+        j = i;
+        while (all[i] && all[i] != '\n')
+            i++;
+        lines[k] = malloc(i - j + 1);
+        if (!lines[k])
+            return (free(all), free_lines(lines), NULL);
+        x = 0;
+        while (x < i - j)
+        {
+            lines[k][x] = all[j + x];
+            x++;
+        }
+        lines[k][i - j] = '\0';
+        k++;
+        if (all[i] == '\n')
+            i++;
+    }
+    lines[k] = NULL;
+    if (out_count)
+        *out_count = k;
+    free(all);
+    return (lines);
+}
+
+void    free_lines(char **lines)
+{
+    int i;
+    
+    if (!lines)
+        return;
+    i = 0;
+    while (lines[i])
+    {
+        free(lines[i]);
+        i++;
+    }
+    free(lines);
+}
+
+int err(const char *msg)
+{
+    write(2, "Error\n", 6);
+    if (msg)
+    {
+        while (*msg)
+            write(2, msg++, 1);
+        write(2, "\n", 1);
+    }
+    return (1);
+}
+/* === ./srcs/mlx_init.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   mlx_init.c                                         :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: michel <michel@student.42.fr>              +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2025/11/17 11:41:03 by michel            #+#    #+#             */
+/*   Updated: 2025/11/17 22:49:17 by michel           ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "../includes/cub3d.h"
+
+static int  load_one_tex(t_game *g, int i)
+{
+    t_tex *t;
+    
+    write(2, "Loading tex: ", 13);
+    write(2, g->tex_path[i], ft_strlen(g->tex_path[i]));
+    write(2, "\n", 1);
+    
+    t = &g->tex[i];
+    t->img = mlx_xpm_file_to_image(g->mlx, g->tex_path[i], &t->w, &t->h);
+    if (!t->img)
+        return (err("mlx_xpm_to_image failed"));
+    t->data = (int *)mlx_get_data_addr(t->img, &t->bpp, &t->line_len, &t->endian);
+    if (!t->data)
+        return (err("mlx_get_data_addr failed"));
+    return (0);
+}
+
+int game_init_mlx(t_game *g)
+{
+    int i;
+    int bpp;
+    int ll;
+    int endian;
+
+    g->mlx = mlx_init();
+    if (!g->mlx)
+        return (err("mlx_init failed"));
+    g->win = mlx_new_window(g->mlx, g->scr_w, g->scr_h, "cub3d");
+    if (!g->win)
+        return (err("mlx_new_window failed"));
+    g->frame = mlx_new_image(g->mlx, g->scr_w, g->scr_h);
+    if (!g->frame)
+        return (err("mlx_new_image failed"));
+    g->frame_data = (int *)mlx_get_data_addr(g->frame, &bpp, &ll, &endian);
+    g->zbuffer = (double *)malloc(sizeof(double) * g->scr_w);
+    if (!g->zbuffer)
+        return (err("malloc zbuffer"));
+    i = 0;
+    while (i < TEX_COUNT)
+    {
+        if (load_one_tex(g, i))
+            return (1);
+        i++;
+    }
+    g->sprite_tex.img = mlx_xpm_file_to_image(
+			g->mlx, SPRITE_XPM_PATH,
+			&g->sprite_tex.w, &g->sprite_tex.h);
+	if (!g->sprite_tex.img)
+		return (err("mlx_xpm_to_image sprite failed"));
+	g->sprite_tex.data = (int *)mlx_get_data_addr(
+			g->sprite_tex.img, &g->sprite_tex.bpp,
+			&g->sprite_tex.line_len, &g->sprite_tex.endian);
+	if (!g->sprite_tex.data)
+		return (err("mlx_get_data_addr sprite failed"));
+    g->sprite_tex.frame_w = g->sprite_tex.w / 3;
+    g->sprite_tex.frame_h = g->sprite_tex.h / 4;
+    g->sprite_tex.frames = 3;
+    return (0);
+}
+/* === ./includes/parse.h === */
+#ifndef PARSE_H
+# define PARSE_H
+# include "cub3d.h"
+
+
+/* parse_elements.c */
+int		parse_elements(t_game *g, char **lines, int *i);
+
+/* parse_colors.c */
+int		parse_color_line(const char *s, int *out_color);
+
+/* parse_map.c */
+int		parse_map(t_game *g, char **lines, int start);
+
+/* map_rectify.c */
+int		rectify_map(t_map *map);
+
+/* map_check.c */
+int		check_map_closed(t_map *map, t_player *p);
+
+#endif
+
+/* === ./includes/sprite_bonus.h === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   sprite_bonus.h                                     :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: michel <michel@student.42.fr>              +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2025/11/17 15:00:00 by michel            #+#    #+#             */
+/*   Updated: 2025/11/18 11:59:33 by michel           ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#ifndef SPRITES_BONUS_H
+# define SPRITES_BONUS_H
+
+# include "cub3d.h"
+
+# define SPRITE_ROW_FRONT 0
+# define SPRITE_ROW_RIGHT 1
+# define SPRITE_ROW_BACK  3
+# define SPRITE_ROW_LEFT  2
+# define SPRITE_RADIUS 0.2
+
+typedef struct  s_sprite_proj
+{
+    double  sprite_x;
+    double  sprite_y;
+    double  transform_x;
+    double  transform_y;
+    int     screen_x;
+    int     height;
+    int     width;
+    int     draw_start_y;
+    int     draw_end_y;
+    int     draw_start_x;
+    int     draw_end_x;
+}   t_sprite_proj;
+
+void	init_sprites_from_map(t_game *g);
+void    render_frame_bonus(t_game *g);
+int     parse_cub_bonus(t_game *g, const char *path);
+void    update_sprites_from_player(t_game *g);
+void    draw_sprites(t_game *g);
+void    game_loop_bonus(t_game *g);
+void	update_sprites_ai(t_game *g);
+#endif
+
+/* === ./includes/render.h === */
+#ifndef RENDER_H
+# define RENDER_H
+# include "cub3d.h"
+
+typedef struct s_ray {
+	double	camera_x;
+	double	ray_dir_x;
+	double	ray_dir_y;
+	int		map_x;
+	int		map_y;
+	double	side_dist_x;
+	double	side_dist_y;
+	double	delta_dist_x;
+	double	delta_dist_y;
+	double	perp_wall_dist;
+	int		step_x;
+	int		step_y;
+	int		hit;
+	int		side;
+	int		line_h;
+	int		draw_start;
+	int		draw_end;
+	int		tex_x;
+    double  wall_x;
+}	t_ray;
+
+void	render_frame(t_game *g);
+void	raycast_column(t_game *g, int x);
+void	draw_wall_stripe(t_game *g, int x, t_ray *r);
+
+#endif
+
+/* === ./includes/cub3d.h === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                            :::      ::::::::   */
+/*   cub3d.h                                        :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: michel & nico                             +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2025/10/30 16:00:00 by fusion            #+#    #+#             */
+/*   Updated: 2025/10/30 16:00:00 by fusion           ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#ifndef CUB3D_H
+# define CUB3D_H
+
+# include <stdlib.h>
+# include <unistd.h>
+# include <fcntl.h>
+# include <math.h>
+# include <stdio.h>
+# include <limits.h>
+# include "../mlx/mlx.h"
+# include "../libft/libft.h"
+# include <X11/keysym.h>
+
+
+# define SCREEN_W  1024
+# define SCREEN_H  768
+
+# define TEX_N 0
+# define TEX_S 1
+# define TEX_W 2
+# define TEX_E 3
+# define TEX_COUNT 4
+
+#define BIG 1e30
+
+# define SPRITE_XPM_PATH "./textures/test.xpm"
+# define SPRITE_SCALE 0.6
+# define MAX_SPRITES 128
+
+typedef struct s_tex {
+	void	*img;
+	int		*data;
+	int		w;
+	int		h;
+	int		bpp;
+	int		line_len;
+	int		endian;
+	int		frame_w;
+	int		frame_h;
+	int		frames;
+}	t_tex;
+
+typedef struct s_map {
+	char	**grid;
+	int		width;
+	int		height;
+}	t_map;
+
+typedef struct s_player {
+	double	x;
+	double	y;
+	double	dir;		// angle en rad
+	double	plane_x;
+	double	plane_y;
+}	t_player;
+
+typedef struct s_sprite {
+	double	x;
+	double	y;
+	double	dist;
+	int		anim_frame;
+	int		type;
+}	t_sprite;
+
+typedef struct s_game {
+	void	*mlx;
+	void	*win;
+	void	*frame;
+	int		*frame_data;
+	int		scr_w;
+	int		scr_h;
+
+	/* textures */
+	char	*tex_path[TEX_COUNT];
+	t_tex	tex[TEX_COUNT];
+	t_tex	sprite_tex;
+
+	/* colors */
+	int		floor_color;
+	int		ceil_color;
+
+	/* map & player */
+	t_map	map;
+	t_player player;
+
+	/* sprites (bonus) */
+	t_sprite sprites[MAX_SPRITES];
+	int		sprite_count;
+
+	/* zbuffer */
+	double	*zbuffer;
+
+	/* input state */
+	int		key_w;
+	int		key_s;
+	int		key_a;
+	int		key_d;
+	int		key_l;
+	int		key_r;
+
+	int		sprite_anim_tick;
+
+}	t_game;
+
+/* main pipeline */
+int		parse_cub(t_game *g, const char *path);
+int		game_init_mlx(t_game *g);
+void	game_init_defaults(t_game *g);
+void	game_destroy(t_game *g);
+void	game_loop(t_game *g);
+
+/* render */
+void	render_frame(t_game *g);
+
+/* input */
+int		key_press(int keycode, t_game *g);
+int		key_release(int keycode, t_game *g);
+int		close_win(t_game *g);
+void	handle_input(t_game *g);
+
+/* utils */
+int		err(const char *msg);
+char	*ft_strdup(const char *s);
+char	**split_lines_from_fd(int fd, int *out_count);
+void	free_lines(char **lines);
+char	*ft_strtrim_spaces(char *s);
+int		ft_atoi_strict(const char *s, int *ok);
+
+#endif
+
+/* === ./libft/ft_calloc.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   ft_calloc.c                                        :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: mm-furi <marvin@42lausanne.ch>             +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2024/10/01 15:57:51 by mm-furi           #+#    #+#             */
+/*   Updated: 2024/10/03 16:57:35 by mm-furi          ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "libft.h"
+
+void	*ft_calloc(size_t i, size_t c)
+{
+	void	*str;
+
+	str = malloc(i * c);
+	if (str == NULL)
+		return (NULL);
+	ft_bzero(str, i * c);
+	return (str);
+}
+
+/* === ./libft/ft_itoa.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   ft_itoa.c                                          :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: mm-furi <marvin@42lausanne.ch>             +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2024/10/01 18:11:36 by mm-furi           #+#    #+#             */
+/*   Updated: 2024/10/02 19:20:30 by mm-furi          ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "libft.h"
+
+static size_t	get_digit_count(int n)
+{
+	size_t	count;
+
+	count = 0;
+	if (n <= 0)
+		count = 1;
+	while (n != 0)
+	{
+		n /= 10;
+		count++;
+	}
+	return (count);
+}
+
+static void	fill_str(char *str, long num, size_t len)
+{
+	str[len] = '\0';
+	len--;
+	if (num == 0)
+	{
+		str[0] = '0';
+		return ;
+	}
+	while (num != 0)
+	{
+		str[len] = (num % 10) + '0';
+		len--;
+		num /= 10;
+	}
+}
+
+char	*ft_itoa(int n)
+{
+	char	*str;
+	size_t	len;
+	long	num;
+	int		neg;
+
+	len = get_digit_count(n);
+	str = malloc(len + 1);
+	if (str == NULL)
+		return (NULL);
+	num = n;
+	neg = n < 0;
+	if (neg)
+		num = -num;
+	fill_str(str, num, len);
+	if (neg)
+		str[0] = '-';
+	return (str);
+}
+
+/* === ./libft/ft_strjoin.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   ft_strjoin.c                                       :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: mm-furi <marvin@42lausanne.ch>             +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2024/10/01 16:56:20 by mm-furi           #+#    #+#             */
+/*   Updated: 2024/10/01 16:58:25 by mm-furi          ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "libft.h"
+
+char	*ft_strjoin(char const *s1, char const *s2)
+{
+	char	*str;
+	size_t	i;
+	size_t	j;
+
+	i = 0;
+	j = 0;
+	str = (char *)malloc(ft_strlen(s1) + ft_strlen(s2) + 1);
+	if (!str)
+		return (NULL);
+	while (i < ft_strlen(s1))
+	{
+		str[i] = s1[i];
+		i++;
+	}
+	while (j < ft_strlen(s2))
+	{
+		str[i] = s2[j];
+		i++;
+		j++;
+	}
+	str[i] = '\0';
+	return (str);
+}
+
+/* === ./libft/ft_strtrim.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   ft_strtrim.c                                       :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: mm-furi <marvin@42lausanne.ch>             +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2024/10/01 17:11:01 by mm-furi           #+#    #+#             */
+/*   Updated: 2024/10/02 16:14:33 by mm-furi          ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "libft.h"
+
+char	*ft_strncpy(char *dest, char *src, unsigned int n)
+{
+	unsigned int	i;
+
+	i = 0;
+	while (src[i] != '\0' && i < n)
+	{
+		dest[i] = src[i];
+		i++;
+	}
+	while (i < n)
+	{
+		dest[i] = '\0';
+		i++;
+	}
+	return (dest);
+}
+
+static int	is_in_set(char c, const char *set)
+{
+	while (*set)
+	{
+		if (c == *set)
+			return (1);
+		set++;
+	}
+	return (0);
+}
+
+char	*ft_strtrim(char const *s1, char const *set)
+{
+	char	*start;
+	char	*end;
+	char	*str;
+
+	if (!s1 || !set)
+		return (NULL);
+	start = (char *)s1;
+	end = (char *)s1 + ft_strlen(s1);
+	while (*start && is_in_set(*start, set))
+		start++;
+	while (end > start && is_in_set(*(end - 1), set))
+		end--;
+	str = (char *)malloc(end - start + 1);
+	if (!str)
+		return (NULL);
+	ft_strncpy(str, start, end - start);
+	str[end - start] = '\0';
+	return (str);
+}
+
+/* === ./libft/ft_strncmp.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   ft_strncmp.c                                       :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: mm-furi <marvin@42lausanne.ch>             +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2024/10/01 14:15:50 by mm-furi           #+#    #+#             */
+/*   Updated: 2024/10/01 14:21:11 by mm-furi          ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "libft.h"
+
+int	ft_strncmp(const char *s1, const char *s2, size_t n)
+{
+	size_t			i;
+	unsigned char	*str1;
+	unsigned char	*str2;
+
+	i = 0;
+	str1 = (unsigned char *)s1;
+	str2 = (unsigned char *)s2;
+	if (n == 0)
+		return (0);
+	while (str1[i] == str2[i] && str1[i] && str2[i] && i < n - 1)
+		i++;
+	return (str1[i] - str2[i]);
+}
+
+/* === ./libft/ft_strrchr.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   ft_strrchr.c                                       :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: mm-furi <marvin@42lausanne.ch>             +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2024/10/01 13:34:56 by mm-furi           #+#    #+#             */
+/*   Updated: 2024/10/01 13:40:17 by mm-furi          ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "libft.h"
+
+char	*ft_strrchr(const char *str, int c)
+{
+	int	i;
+
+	i = ft_strlen(str);
+	if (c == '\0')
+		return ((char *)&str[i]);
+	while (i >= 0)
+	{
+		if (str[i] == (char)c)
+			return ((char *)&str[i]);
+		i--;
+	}
+	return (NULL);
+}
+
+/* === ./libft/ft_bzero.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   ft_bzero.c                                         :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: mm-furi <marvin@42lausanne.ch>             +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2024/10/01 11:03:09 by mm-furi           #+#    #+#             */
+/*   Updated: 2024/10/01 11:52:31 by mm-furi          ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "libft.h"
+
+void	*ft_bzero(void *s, size_t n)
+{
+	unsigned char	*s2;
+	size_t			i;
+
+	s2 = s;
+	i = 0;
+	while (i < n)
+	{
+		s2[i] = 0;
+		i++;
+	}
+	return (s);
+}
+
+/* === ./libft/ft_memcmp.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   ft_memcmp.c                                        :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: mm-furi <marvin@42lausanne.ch>             +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2024/10/01 13:48:50 by mm-furi           #+#    #+#             */
+/*   Updated: 2024/10/03 17:05:15 by mm-furi          ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "libft.h"
+
+int	ft_memcmp(void const *s1, void const *s2, size_t n)
+{
+	size_t				i;
+	const unsigned char	*s3;
+	const unsigned char	*s4;
+
+	i = 0;
+	s3 = (unsigned char *)s1;
+	s4 = (unsigned char *)s2;
+	if (n == 0)
+		return (0);
+	while (s3[i] == s4[i] && i < n - 1)
+		i++;
+	return (s3[i] - s4[i]);
+}
+
+/* === ./libft/ft_lstclear_bonus.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   ft_lstclear.c                                      :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: mm-furi <marvin@42lausanne.ch>             +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2024/10/02 15:35:05 by mm-furi           #+#    #+#             */
+/*   Updated: 2024/10/02 15:40:18 by mm-furi          ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "libft.h"
+
+void	ft_lstclear(t_list **lst, void (*del)(void*))
+{
+	t_list	*tmp;
+
+	if (*lst)
+	{
+		while (*lst)
+		{
+			tmp = (*lst)->next;
+			ft_lstdelone(*lst, del);
+			(*lst) = tmp;
+		}
+	}
+}
+
+/* === ./libft/ft_lstiter_bonus.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   ft_lstiter.c                                       :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: mm-furi <marvin@42lausanne.ch>             +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2024/10/02 15:41:36 by mm-furi           #+#    #+#             */
+/*   Updated: 2024/10/02 15:46:47 by mm-furi          ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "libft.h"
+
+void	ft_lstiter(t_list *lst, void (*f)(void *))
+{
+	while (lst)
+	{
+		f(lst->content);
+		lst = lst->next;
+	}
+}
+
+/* === ./libft/ft_isalnum.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   ft_isalnum.c                                       :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: mm-furi <marvin@42lausanne.ch>             +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2024/10/01 10:33:20 by mm-furi           #+#    #+#             */
+/*   Updated: 2024/10/02 18:37:58 by mm-furi          ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "libft.h"
+
+int	ft_isalnum(int c)
+{
+	if ((c >= 65 && c <= 90) || (c >= 97 && c <= 122) || (c >= 48 && c <= 57))
+		return (1);
+	return (0);
+}
+
+/* === ./libft/ft_tolower.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   ft_tolower.c                                       :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: mm-furi <marvin@42lausanne.ch>             +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2024/10/01 13:25:37 by mm-furi           #+#    #+#             */
+/*   Updated: 2024/10/01 13:27:45 by mm-furi          ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "libft.h"
+
+int	ft_tolower(int c)
+{
+	if (c >= 'A' && c <= 'Z')
+		c += 32;
+	return (c);
+}
+
+/* === ./libft/ft_lstsize_bonus.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   ft_lstsize.c                                       :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: mm-furi <marvin@42lausanne.ch>             +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2024/10/02 15:05:20 by mm-furi           #+#    #+#             */
+/*   Updated: 2024/10/02 16:02:06 by mm-furi          ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "libft.h"
+
+int	ft_lstsize(t_list *lst)
+{
+	int	i;
+
+	i = 0;
+	while (lst != NULL)
+	{
+		i++;
+		lst = lst->next;
+	}
+	return (i);
+}
+
+/* === ./libft/ft_lstnew_bonus.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   ft_lstnew.c                                        :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: mm-furi <marvin@42lausanne.ch>             +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2024/10/02 14:50:21 by mm-furi           #+#    #+#             */
+/*   Updated: 2024/10/02 19:25:15 by mm-furi          ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "libft.h"
+
+t_list	*ft_lstnew(void *content)
+{
+	t_list	*new_content;
+
+	new_content = (t_list *)malloc(sizeof(t_list) * 1);
+	if (!new_content)
+		return (NULL);
+	new_content -> content = content;
+	new_content -> next = NULL;
+	return (new_content);
+}
+
+/* === ./libft/ft_memmove.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   ft_memmove.c                                       :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: mm-furi <marvin@42lausanne.ch>             +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2024/10/01 12:15:10 by mm-furi           #+#    #+#             */
+/*   Updated: 2024/10/02 19:28:47 by mm-furi          ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "libft.h"
+
+void	*ft_memmove(void *dest, const void *src, size_t n)
+{
+	unsigned char	*dest1;
+	unsigned char	*src1;
+	size_t			i;
+
+	if (n == 0)
+		return (dest);
+	if (dest == NULL || src == NULL)
+		return (NULL);
+	dest1 = (unsigned char *)dest;
+	src1 = (unsigned char *)src;
+	i = 0;
+	if (dest1 > src1)
+	{
+		while (n--)
+			dest1[n] = src1[n];
+	}
+	else
+	{
+		while (i < n)
+		{
+			dest1[i] = src1[i];
+			i++;
+		}
+	}
+	return (dest1);
+}
+
+/* === ./libft/ft_isprint.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   ft_isprint.c                                       :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: mm-furi <marvin@42lausanne.ch>             +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2024/10/01 10:39:18 by mm-furi           #+#    #+#             */
+/*   Updated: 2024/10/02 18:38:58 by mm-furi          ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "libft.h"
+
+int	ft_isprint(int c)
+{
+	if (c >= 32 && c <= 126)
+		return (1);
+	return (0);
+}
+
+/* === ./libft/ft_isdigit.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   ft_isdigit.c                                       :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: mm-furi <marvin@42lausanne.ch>             +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2024/10/01 10:28:15 by mm-furi           #+#    #+#             */
+/*   Updated: 2024/10/01 10:31:40 by mm-furi          ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "libft.h"
+
+int	ft_isdigit(int c)
+{
+	if (c >= '0' && c <= '9')
+		return (1);
+	return (0);
+}
+
+/* === ./libft/ft_lstlast_bonus.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   ft_lstlast.c                                       :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: mm-furi <marvin@42lausanne.ch>             +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2024/10/02 15:12:23 by mm-furi           #+#    #+#             */
+/*   Updated: 2024/10/02 16:02:43 by mm-furi          ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "libft.h"
+
+t_list	*ft_lstlast(t_list *lst)
+{
+	while (lst)
+	{
+		if (!lst->next)
+			return (lst);
+		lst = lst->next;
+	}
+	return (lst);
+}
+
+/* === ./libft/ft_putstr_fd.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   ft_putstr_fd.c                                     :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: mm-furi <marvin@42lausanne.ch>             +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2024/10/02 13:21:05 by mm-furi           #+#    #+#             */
+/*   Updated: 2024/10/02 13:23:35 by mm-furi          ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "libft.h"
+
+void	ft_putstr_fd(char *s, int fd)
+{
+	int	i;
+
+	i = 0;
+	while (s[i])
+	{
+		write(fd, &s[i], 1);
+		i++;
+	}
+}
+
+/* === ./libft/ft_lstadd_back_bonus.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   ft_lstadd_back_bonus.c                             :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: michel <michel@student.42.fr>              +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2024/10/02 15:18:50 by mm-furi           #+#    #+#             */
+/*   Updated: 2024/12/05 19:50:14 by michel           ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "libft.h"
+
+void	ft_lstadd_back(t_list **lst, t_list *nouveau)
+{
+	t_list	*tmp;
+
+	if (!nouveau)
+		return ;
+	if (!*lst)
+	{
+		*lst = nouveau;
+		return ;
+	}
+	tmp = ft_lstlast(*lst);
+	tmp->next = nouveau;
+}
+
+/* === ./libft/ft_atoi.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   ft_atoi.c                                          :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: mm-furi <mm-furi@student.42.fr>            +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2024/10/01 15:34:55 by mm-furi           #+#    #+#             */
+/*   Updated: 2024/10/17 14:23:02 by mm-furi          ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "libft.h"
+#include <stdio.h>
+
+int	ft_atoi(const char *str)
+{
+	int	i;
+	int	result;
+	int	sign;
+
+	i = 0;
+	result = 0;
+	sign = 1;
+	while (str[i] == 32 || (str[i] >= 9 && str[i] <= 13))
+		i++;
+	if (str[i] == '-')
+		sign = -1;
+	if (str[i] == '-' || str[i] == '+')
+		i++;
+	while (str[i] >= '0' && str[i] <= '9')
+	{
+		result = result * 10 + (str[i] - '0');
+		i++;
+	}
+	return (result * sign);
+}
+
+int	main(void)
+{
+	printf("%i\n", ft_atoi("-+87t48"));
+	return (0);
+}
+
+/* === ./libft/libft.h === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   libft.h                                            :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: michel <michel@student.42.fr>              +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2024/10/02 14:00:25 by mm-furi           #+#    #+#             */
+/*   Updated: 2024/12/05 19:50:10 by michel           ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#ifndef LIBFT_H
+# define LIBFT_H
+
+# include <unistd.h>
+# include <stdlib.h>
+
+typedef struct s_list
+{
+	void			*content;
+	struct s_list	*next;
+}	t_list;
+
+int		ft_atoi(const char *str);
+void	*ft_bzero(void *s, size_t n);
+void	*ft_calloc(size_t i, size_t c);
+int		ft_isalnum(int c);
+int		ft_isalpha(int c);
+int		ft_isascii(int c);
+int		ft_isdigit(int c);
+int		ft_isprint(int c);
+char	*ft_itoa(int n);
+void	*ft_memchr(const void *str, int c, size_t n);
+int		ft_memcmp(void const *s1, void const *s2, size_t n);
+void	*ft_memcpy(void *dest, const void *src, size_t n);
+void	*ft_memmove(void *dest, const void *src, size_t n);
+void	*ft_memset(void *str, int c, size_t n);
+void	ft_putchar_fd(char c, int fd);
+void	ft_putendl_fd(char *s, int fd);
+void	ft_putnbr_fd(int n, int fd);
+void	ft_putstr_fd(char *s, int fd);
+char	**ft_split(char const *str, char charset);
+char	*ft_strchr(const char *str, int c);
+char	*ft_strdup(const char *s1);
+void	ft_striteri(char *s, void (*f)(unsigned int, char*));
+char	*ft_strjoin(char const *s1, char const *s2);
+size_t	ft_strlcat(char *dst, const char *src, size_t size);
+size_t	ft_strlcpy(char *dest, const char *src, size_t size);
+size_t	ft_strlen(const char *str);
+char	*ft_strmapi(char const *s, char (*f)(unsigned int, char));
+int		ft_strncmp(const char *s1, const char *s2, size_t n);
+char	*ft_strnstr(const char *str, const char *to_find, size_t n);
+char	*ft_strrchr(const char *str, int c);
+char	*ft_strtrim(char const *s1, char const *set);
+char	*ft_substr(char const *s, unsigned int start, size_t len);
+int		ft_tolower(int c);
+int		ft_toupper(int c);
+t_list	*ft_lstnew(void *content);
+void	ft_lstadd_front(t_list **lst, t_list *nouveau);
+int		ft_lstsize(t_list *lst);
+t_list	*ft_lstlast(t_list *lst);
+void	ft_lstadd_back(t_list **lst, t_list *nouveau);
+void	ft_lstdelone(t_list *lst, void (*del)(void *));
+void	ft_lstclear(t_list **lst, void (*del)(void *));
+void	ft_lstiter(t_list *lst, void (*f)(void *));
+t_list	*ft_lstmap(t_list *lst, void *(*f)(void *), void (*del)(void *));
+#endif
+/* === ./libft/ft_lstmap_bonus.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   ft_lstmap.c                                        :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: mm-furi <marvin@42lausanne.ch>             +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2024/10/02 15:50:12 by mm-furi           #+#    #+#             */
+/*   Updated: 2024/10/02 19:24:27 by mm-furi          ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "libft.h"
+
+t_list	*ft_lstmap(t_list *lst, void *(*f)(void *), void (*del)(void *))
+{
+	t_list	*new_lst;
+	t_list	*save;
+
+	if (!lst || !f || !del)
+		return (0);
+	new_lst = ft_lstnew(f(lst->content));
+	if (!new_lst)
+		return (0);
+	save = new_lst;
+	lst = lst->next;
+	while (lst)
+	{
+		new_lst->next = ft_lstnew(f(lst->content));
+		if (!new_lst->next)
+		{
+			ft_lstclear(&save, del);
+			return (0);
+		}
+		new_lst = new_lst->next;
+		lst = lst->next;
+	}
+	new_lst->next = NULL;
+	return (save);
+}
+
+/* === ./libft/ft_strlcpy.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   ft_strlcpy.c                                       :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: mm-furi <marvin@42lausanne.ch>             +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2024/10/01 12:31:21 by mm-furi           #+#    #+#             */
+/*   Updated: 2024/10/01 12:38:23 by mm-furi          ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "libft.h"
+
+size_t	ft_strlcpy(char *dest, const char *src, size_t size)
+{
+	size_t	i;
+
+	i = 0;
+	if (size == 0)
+		return (ft_strlen(src));
+	while (src[i] && i < size - 1)
+	{
+		dest[i] = src[i];
+		i++;
+	}
+	dest[i] = '\0';
+	return (ft_strlen(src));
+}
+
+/* === ./libft/ft_putendl_fd.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   ft_putend1_fd.c                                    :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: mm-furi <marvin@42lausanne.ch>             +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2024/10/02 13:24:27 by mm-furi           #+#    #+#             */
+/*   Updated: 2024/10/02 13:27:30 by mm-furi          ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "libft.h"
+
+void	ft_putendl_fd(char *s, int fd)
+{
+	int	i;
+
+	i = 0;
+	while (s[i])
+	{
+		write(fd, &s[i], 1);
+		i++;
+	}
+	write(fd, "\n", 1);
+}
+
+/* === ./libft/ft_strmapi.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   ft_strmapi.c                                       :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: mm-furi <marvin@42lausanne.ch>             +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2024/10/02 12:39:53 by mm-furi           #+#    #+#             */
+/*   Updated: 2024/10/02 19:33:46 by mm-furi          ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "libft.h"
+
+char	*ft_strmapi(char const *s, char (*f)(unsigned int, char))
+{
+	int		i;
+	int		len;
+	char	*result;
+
+	len = ft_strlen(s);
+	result = (char *)malloc(sizeof(char) * (len + 1));
+	if (!result)
+		return (NULL);
+	i = 0;
+	while (s[i])
+	{
+		result[i] = (f)(i, s[i]);
+		i++;
+	}
+	result[i] = '\0';
+	return (result);
+}
+
+/* === ./libft/ft_putnbr_fd.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   ft_putnbr_fd.c                                     :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: mm-furi <marvin@42lausanne.ch>             +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2024/10/02 13:28:12 by mm-furi           #+#    #+#             */
+/*   Updated: 2024/10/02 19:29:59 by mm-furi          ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "libft.h"
+
+void	ft_putnbr_fd(int n, int fd)
+{
+	if (n == -2147483648)
+	{
+		write(fd, "-2147483648", 11);
+		return ;
+	}
+	if (n < 0)
+	{
+		ft_putchar_fd('-', fd);
+		n = -n;
+	}
+	if (n > 9)
+	{
+		ft_putnbr_fd(n / 10, fd);
+		ft_putnbr_fd(n % 10, fd);
+	}
+	else
+		ft_putchar_fd(n + '0', fd);
+}
+
+/* === ./libft/ft_strlen.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   ft_strlen.c                                        :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: mm-furi <mm-furi@student.42.fr>            +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2024/10/01 10:42:55 by mm-furi           #+#    #+#             */
+/*   Updated: 2024/11/13 16:18:43 by mm-furi          ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "libft.h"
+
+size_t	ft_strlen(const char *str)
+{
+	size_t	i;
+
+	if (!str)
+		return (0);
+	i = 0;
+	while (str[i])
+		i++;
+	return (i);
+}
+
+/* === ./libft/ft_isalpha.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   ft_isalpha.c                                       :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: mm-furi <marvin@42lausanne.ch>             +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2024/10/01 10:20:39 by mm-furi           #+#    #+#             */
+/*   Updated: 2024/10/01 10:27:42 by mm-furi          ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "libft.h"
+
+int	ft_isalpha(int c)
+{
+	if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'))
+		return (1);
+	return (0);
+}
+
+/* === ./libft/ft_substr.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   ft_substr.c                                        :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: mm-furi <marvin@42lausanne.ch>             +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2024/10/01 16:36:35 by mm-furi           #+#    #+#             */
+/*   Updated: 2024/10/02 19:39:45 by mm-furi          ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "libft.h"
+
+static size_t	get_actual_length(char const *s, unsigned int start, size_t len)
+{
+	size_t	s_len;
+	size_t	actual_len;
+
+	s_len = ft_strlen(s);
+	if (start >= s_len)
+	{
+		actual_len = 0;
+	}
+	else
+	{
+		if (s_len - start < len)
+			actual_len = s_len - start;
+		else
+			actual_len = len;
+	}
+	return (actual_len);
+}
+
+char	*ft_substr(char const *s, unsigned int start, size_t len)
+{
+	size_t	actual_len;
+	size_t	j;
+	char	*substr;
+
+	if (!s)
+		return (NULL);
+	actual_len = get_actual_length(s, start, len);
+	substr = (char *)malloc(sizeof(char) * (actual_len + 1));
+	if (!substr)
+		return (NULL);
+	j = 0;
+	while (j < actual_len && s[start + j])
+	{
+		substr[j] = s[start + j];
+		j++;
+	}
+	substr[j] = '\0';
+	return (substr);
+}
+
+/* === ./libft/ft_toupper.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   ft_toupper.c                                       :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: mm-furi <marvin@42lausanne.ch>             +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2024/10/01 13:23:09 by mm-furi           #+#    #+#             */
+/*   Updated: 2024/10/01 13:25:23 by mm-furi          ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "libft.h"
+
+int	ft_toupper(int c)
+{
+	if (c >= 'a' && c <= 'z')
+		c -= 32;
+	return (c);
+}
+
+/* === ./libft/ft_strchr.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   ft_strchr.c                                        :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: mm-furi <marvin@42lausanne.ch>             +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2024/10/01 13:29:40 by mm-furi           #+#    #+#             */
+/*   Updated: 2024/10/01 13:34:14 by mm-furi          ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "libft.h"
+
+char	*ft_strchr(const char *str, int c)
+{
+	int		i;
+	char	ch;
+
+	i = 0;
+	ch = (char)c;
+	if (ch == '\0')
+	{
+		i = ft_strlen(str);
+		return ((char *)&str[i]);
+	}
+	while (str[i])
+	{
+		if (str[i] == ch)
+			return ((char *)&str[i]);
+		i++;
+	}
+	return (NULL);
+}
+
+/* === ./libft/ft_lstdelone_bonus.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   ft_lstdelone.c                                     :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: mm-furi <marvin@42lausanne.ch>             +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2024/10/02 15:30:57 by mm-furi           #+#    #+#             */
+/*   Updated: 2024/10/02 16:03:24 by mm-furi          ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "libft.h"
+
+void	ft_lstdelone(t_list *lst, void (*del)(void*))
+{
+	if (!lst || !del)
+		return ;
+	del(lst->content);
+	free(lst);
+}
+
+/* === ./libft/ft_striteri.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   ft_striteri.c                                      :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: mm-furi <marvin@42lausanne.ch>             +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2024/10/02 13:06:10 by mm-furi           #+#    #+#             */
+/*   Updated: 2024/10/02 19:32:04 by mm-furi          ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "libft.h"
+
+void	ft_striteri(char *s, void (*f)(unsigned int, char*))
+{
+	int	i;
+
+	if (s == NULL || f == NULL)
+		return ;
+	i = 0;
+	while (s[i])
+	{
+		f(i, &s[i]);
+		i++;
+	}
+}
+
+/* === ./libft/ft_strnstr.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   ft_strnstr.c                                       :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: mm-furi <marvin@42lausanne.ch>             +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2024/10/01 14:34:54 by mm-furi           #+#    #+#             */
+/*   Updated: 2024/10/02 19:39:04 by mm-furi          ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+#include "libft.h"
+
+char	*ft_strnstr(const char *str, const char *to_find, size_t n)
+{
+	size_t	i;
+	size_t	j;
+
+	i = 0;
+	if (!*to_find)
+		return ((char *)str);
+	while (str[i] && i < n)
+	{
+		j = 0;
+		while (str[i + j] && to_find[j]
+			&& str[i + j] == to_find[j] && i + j < n)
+			j++;
+		if (!to_find[j])
+			return ((char *)str + i);
+		i++;
+	}
+	return (0);
+}
+
+/* === ./libft/ft_isascii.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   ft_isascii.c                                       :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: mm-furi <marvin@42lausanne.ch>             +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2024/10/01 12:12:08 by mm-furi           #+#    #+#             */
+/*   Updated: 2024/10/01 12:13:35 by mm-furi          ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "libft.h"
+
+int	ft_isascii(int c)
+{
+	if (c >= 0 && c <= 127)
+		return (1);
+	return (0);
+}
+
+/* === ./libft/ft_lstadd_front_bonus.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   ft_lstadd_front_bonus.c                            :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: michel <michel@student.42.fr>              +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2024/10/02 15:00:20 by mm-furi           #+#    #+#             */
+/*   Updated: 2024/12/05 19:50:06 by michel           ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "libft.h"
+
+void	ft_lstadd_front(t_list **lst, t_list *nouveau)
+{
+	if (lst && nouveau)
+	{
+		nouveau->next = *lst;
+		*lst = nouveau;
+	}
+}
+
+/* === ./libft/ft_memchr.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   ft_memchr.c                                        :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: mm-furi <marvin@42lausanne.ch>             +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2024/10/01 13:41:19 by mm-furi           #+#    #+#             */
+/*   Updated: 2024/10/03 17:00:24 by mm-furi          ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "libft.h"
+
+void	*ft_memchr(const void *str, int c, size_t n)
+{
+	size_t			i;
+	unsigned char	*str1;
+
+	i = 0;
+	str1 = (unsigned char *)str;
+	while (i < n)
+	{
+		if (str1[i] == (unsigned char)c)
+			return (&str1[i]);
+		i++;
+	}
+	return (NULL);
+}
+
+/* === ./libft/ft_strlcat.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   ft_strlcat.c                                       :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: mm-furi <marvin@42lausanne.ch>             +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2024/10/01 12:39:37 by mm-furi           #+#    #+#             */
+/*   Updated: 2024/10/02 19:32:50 by mm-furi          ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "libft.h"
+
+size_t	ft_strlcat(char *dst, const char *src, size_t size)
+{
+	size_t	len_d;
+	size_t	len_s;
+	size_t	i;
+
+	i = 0;
+	len_d = ft_strlen(dst);
+	len_s = ft_strlen(src);
+	if (size <= len_d)
+		return (size + len_s);
+	while (src[i] && i < (size - len_d - 1))
+	{
+		dst[len_d + i] = src[i];
+		i++;
+	}
+	dst[len_d + i] = '\0';
+	return (len_d + len_s);
+}
+
+/* === ./libft/ft_split.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   ft_split.c                                         :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: mm-furi <marvin@42lausanne.ch>             +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2024/10/04 14:42:32 by mm-furi           #+#    #+#             */
+/*   Updated: 2024/10/04 14:42:39 by mm-furi          ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "libft.h"
+
+void	ft_putstr(char *str)
+{
+	int	i;
+
+	i = 0;
+	while (str[i])
+	{
+		write(1, &str[i], 1);
+		i++;
+	}
+}
+
+int	is_delim(char c, char delim)
+{
+	if (c == delim)
+		return (1);
+	return (0);
+}
+
+int	count_words(const char *str, char delim)
+{
+	int	i;
+	int	j;
+
+	i = 0;
+	j = 0;
+	while (str[i])
+	{
+		while (str[i] && is_delim(str[i], delim))
+			i++;
+		if (str[i] && !is_delim(str[i], delim))
+		{
+			j++;
+			while (str[i] && !is_delim(str[i], delim))
+				i++;
+		}
+	}
+	return (j);
+}
+
+char	*ft_strdup2(const char *str, int start, int end)
+{
+	char	*dup;
+	int		i;
+
+	i = 0;
+	dup = (char *)malloc(sizeof(char) * (end - start + 1));
+	if (!dup)
+		return (NULL);
+	while (start < end)
+	{
+		dup[i] = str[start];
+		start++;
+		i++;
+	}
+	dup[i] = '\0';
+	return (dup);
+}
+
+char	**ft_split(char const *s, char c)
+{
+	int		i;
+	int		j;
+	int		k;
+	char	**result;
+
+	result = (char **)malloc(sizeof(char *) * (count_words(s, c) + 1));
+	if (!result)
+		return (NULL);
+	i = 0;
+	j = 0;
+	while (s[i])
+	{
+		while (s[i] && is_delim(s[i], c))
+			i++;
+		k = i;
+		while (s[i] && !is_delim(s[i], c))
+			i++;
+		if (k < i)
+			result[j++] = ft_strdup2(s, k, i);
+	}
+	result[j] = NULL;
+	return (result);
+}
+
+/* === ./libft/ft_memcpy.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   ft_memcpy.c                                        :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: mm-furi <marvin@42lausanne.ch>             +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2024/10/01 12:07:34 by mm-furi           #+#    #+#             */
+/*   Updated: 2024/10/03 17:07:25 by mm-furi          ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "libft.h"
+
+void	*ft_memcpy(void *dest, const void *src, size_t n)
+{
+	unsigned char	*dest1;
+	unsigned char	*src1;
+
+	if (n == 0)
+		return (dest);
+	if (dest == NULL || src == NULL)
+		return (NULL);
+	dest1 = (unsigned char *)dest;
+	src1 = (unsigned char *)src;
+	while (n--)
+		*dest1++ = *src1++;
+	return (dest);
+}
+
+/* === ./libft/ft_putchar_fd.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   ft_putchar_fd.c                                    :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: mm-furi <marvin@42lausanne.ch>             +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2024/10/02 13:15:26 by mm-furi           #+#    #+#             */
+/*   Updated: 2024/10/02 13:18:18 by mm-furi          ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "libft.h"
+
+void	ft_putchar_fd(char c, int fd)
+{
+	write(fd, &c, 1);
+}
+
+/* === ./libft/ft_strdup.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   ft_strdup.c                                        :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: mm-furi <mm-furi@student.42.fr>            +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2024/10/01 16:04:46 by mm-furi           #+#    #+#             */
+/*   Updated: 2024/11/18 16:33:38 by mm-furi          ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "libft.h"
+
+char	*ft_strdup(const char *s1)
+{
+	char	*dup;
+	size_t	len;
+
+	if (!s1)
+	{
+		ft_putstr_fd("Erreur : chaîne NULL dans ft_strdup\n", 2);
+		return (NULL);
+	}
+	len = ft_strlen(s1);
+	dup = malloc(len + 1);
+	if (!dup)
+	{
+		ft_putstr_fd("Erreur d'allocation mémoire dans ft_strdup\n", 2);
+		return (NULL);
+	}
+	ft_strlcpy(dup, s1, len + 1);
+	return (dup);
+}
+
+/* === ./libft/ft_memset.c === */
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   ft_memset.c                                        :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: mm-furi <marvin@42lausanne.ch>             +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2024/10/01 10:48:28 by mm-furi           #+#    #+#             */
+/*   Updated: 2024/10/02 19:29:11 by mm-furi          ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
+#include "libft.h"
+
+void	*ft_memset(void *str, int c, size_t n)
+{
+	unsigned char	*s2;
+	size_t			i;
+
+	s2 = str;
+	i = 0;
+	while (i < n)
+	{
+		s2[i] = c;
+		i++;
+	}
+	return (str);
+}
