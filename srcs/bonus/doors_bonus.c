@@ -6,7 +6,7 @@
 /*   By: michel <michel@student.42.fr>              +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2025/11/18 14:06:38 by michel            #+#    #+#             */
-/*   Updated: 2025/11/20 02:35:29 by michel           ###   ########.fr       */
+/*   Updated: 2025/11/20 03:24:59 by michel           ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -32,6 +32,7 @@ void init_doors_from_map(t_game *g)
                 g->doors[g->door_count].open = 0;
                 g->doors[g->door_count].frame = 0;
                 g->doors[g->door_count].anim_dir = 0;
+                g->doors[g->door_count].timer = 0.0;
                 g->door_count++;
             }
             x++;
@@ -93,24 +94,30 @@ void try_use_door(t_game *g)
 void    update_doors_anim(t_game *g)
 {
     int i;
-    
+
     i = 0;
     while (i < g->door_count)
     {
         if (g->doors[i].anim_dir != 0)
         {
-            g->doors[i].frame += g->doors[i].anim_dir;
-            if (g->doors[i].frame <= 0)
+            // vitesse de l'animation : 0.2 = lent, 1.0 = normal
+            g->doors[i].timer += 0.2;
+            if (g->doors[i].timer >= 1.0)
             {
-                g->doors[i].frame = 0;
-                g->doors[i].anim_dir = 0;
-                g->doors[i].open = 0;
-            }
-            else if (g->doors[i].frame >= DOOR_FRAMES - 1)
-            {
-                g->doors[i].frame = DOOR_FRAMES - 1;
-                g->doors[i].anim_dir = 0;
-                g->doors[i].open = 1;
+                g->doors[i].timer -= 1.0;
+                g->doors[i].frame += g->doors[i].anim_dir;
+                if (g->doors[i].frame <= 0)
+                {
+                    g->doors[i].frame = 0;
+                    g->doors[i].anim_dir = 0;
+                    g->doors[i].open = 0;
+                }
+                else if (g->doors[i].frame >= DOOR_FRAMES - 1)
+                {
+                    g->doors[i].frame = DOOR_FRAMES - 1;
+                    g->doors[i].anim_dir = 0;
+                    g->doors[i].open = 1;
+                }
             }
         }
         i++;

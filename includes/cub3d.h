@@ -85,6 +85,7 @@ typedef struct	s_door
 	int open;
 	int	frame;
 	int anim_dir;
+	double timer;
 }	t_door;
 
 typedef struct s_game {
