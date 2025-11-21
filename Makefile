@@ -35,6 +35,7 @@ SRCS        = \
 	$(SRC_DIR)/parse/parse_map.c \
 	$(SRC_DIR)/parse/map_check.c \
 	$(SRC_DIR)/utils/utils.c \
+	$(SRC_DIR)/bonus/doors_bonus.c \
 	$(SRC_DIR)/utils/read_file.c
 
 OBJS        = $(SRCS:$(SRC_DIR)/%.c=$(OBJ_DIR)/%.o)
@@ -52,7 +53,7 @@ SRCS_BONUS  = \
 	$(SRC_DIR)/parse/parse_element.c \
 	$(SRC_DIR)/parse/parse_color.c \
 	$(SRC_DIR)/parse/parse_map.c \
-	$(SRC_DIR)/parse/map_check.c \
+	$(SRC_DIR)/bonus/map_check_bonus.c \
 	$(SRC_DIR)/utils/utils.c \
 	$(SRC_DIR)/utils/read_file.c \
 	$(SRC_DIR)/bonus/parse_cub_bonus.c \
@@ -64,6 +65,8 @@ SRCS_BONUS  = \
 	$(SRC_DIR)/bonus/render_frame_bonus.c \
 	$(SRC_DIR)/bonus/doors_bonus.c \
 	$(SRC_DIR)/bonus/raycast_texture_bonus.c \
+	$(SRC_DIR)/bonus/draw_minimap_bonus.c \
+	$(SRC_DIR)/bonus/draw_minimap_utils.c \
 	$(SRC_DIR)/bonus/raycast_door_bonus.c
 
 OBJS_BONUS  = $(SRCS_BONUS:$(SRC_DIR)/%.c=$(OBJ_DIR)/%.o)

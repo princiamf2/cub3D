@@ -6,7 +6,7 @@
 /*   By: michel <michel@student.42.fr>              +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2025/11/17 15:00:00 by michel            #+#    #+#             */
-/*   Updated: 2025/11/20 02:47:57 by michel           ###   ########.fr       */
+/*   Updated: 2025/11/21 03:11:30 by michel           ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -27,6 +27,11 @@
 # define DOOR_INNER_W     53
 # define DOOR_INNER_TOP    10
 # define DOOR_INNER_BOTTOM 8
+
+# define MM_TILE    8
+# define MM_RADIUS  6
+# define MM_OFFSET_X 10
+# define MM_OFFSET_Y 10
 
 typedef struct  s_sprite_proj
 {
@@ -58,4 +63,8 @@ t_door  *get_door_of_cell(t_game *g, int mx, int my);
 int     compute_door_tex_x(t_game *g, t_ray *r, t_tex *tex);
 int     compute_normal_tex_x(t_tex *tex, t_ray *r);
 int     compute_tex_x(t_game *g, t_ray *r, t_tex *tex);
+int     check_map_closed_bonus(t_map *map, t_player *p);
+void    draw_minimap_bonus(t_game *g);
+void	mm_draw_sprites(t_game *g);
+void	mm_put_pixel(t_game *g, int x, int y, int color);
 #endif

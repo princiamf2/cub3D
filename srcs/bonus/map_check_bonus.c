@@ -1,16 +1,17 @@
 /* ************************************************************************** */
 /*                                                                            */
 /*                                                        :::      ::::::::   */
-/*   map_check.c                                        :+:      :+:    :+:   */
+/*   map_check_bonus.c                                  :+:      :+:    :+:   */
 /*                                                    +:+ +:+         +:+     */
 /*   By: michel <michel@student.42.fr>              +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
-/*   Created: 2025/11/15 13:06:38 by michel            #+#    #+#             */
-/*   Updated: 2025/11/20 16:34:44 by michel           ###   ########.fr       */
+/*   Created: 2025/11/20 16:37:51 by michel            #+#    #+#             */
+/*   Updated: 2025/11/20 17:06:55 by michel           ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
 #include "../../includes/cub3d.h"
+#include "../../includes/sprite_bonus.h"
 
 static int bad_neighbor(t_map *m, int y, int x)
 {
@@ -27,17 +28,18 @@ static int bad_neighbor(t_map *m, int y, int x)
     return (0);
 }
 
-static int  is_valid_map_char(char c)
+static int  is_valid_map_char_bonus(char c)
 {
     if (c == '0' || c == '1'
         || c == 'N' || c == 'S'
         || c == 'E' || c == 'W'
-        || c == ' ')
+        || c == ' ' || c == '2'
+        || c == 'D')
         return (1);
     return (0);
 }
 
-int check_map_closed(t_map *map, t_player *p)
+int check_map_closed_bonus(t_map *map, t_player *p)
 {
     int y;
     int x;
@@ -50,7 +52,7 @@ int check_map_closed(t_map *map, t_player *p)
         x = 0;
         while (x < map->width)
         {
-            if (!is_valid_map_char(map->grid[y][x]))
+            if (!is_valid_map_char_bonus(map->grid[y][x]))
                 return (err("invalid character in map"));
             if (map->grid[y][x] == '0')
             {

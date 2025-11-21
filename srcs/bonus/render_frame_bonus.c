@@ -6,7 +6,7 @@
 /*   By: michel <michel@student.42.fr>              +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2025/11/17 19:07:49 by michel            #+#    #+#             */
-/*   Updated: 2025/11/20 02:42:05 by michel           ###   ########.fr       */
+/*   Updated: 2025/11/20 19:44:44 by michel           ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -25,5 +25,6 @@ void render_frame_bonus(t_game *g)
         x++;
     }
     draw_sprites(g);
+    draw_minimap_bonus(g);
     mlx_put_image_to_window(g->mlx, g->win, g->frame, 0, 0);
 }
